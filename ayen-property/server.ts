@@ -120,6 +120,14 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static('dist'));
+    
+    // --- TAMBAHKAN BAGIAN INI ---
+    // Fallback for SPA routing in production
+    import('path').then(path => {
+      app.get('*', (req, res) => {
+        res.sendFile(path.resolve('dist/index.html'));
+      });
+    });
   }
 
   const PORT = process.env.PORT || 3000;
