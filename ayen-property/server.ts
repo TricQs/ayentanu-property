@@ -1,49 +1,38 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import Database from 'better-sqlite3';
+import mongoose from 'mongoose';
 
-const db = new Database('properties.db');
+// Connect to MongoDB
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ayentanu_property';
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
-// Initialize DB
-db.exec(`
-  CREATE TABLE IF NOT EXISTS properties (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    judul TEXT,
-    tipe TEXT,
-    status TEXT,
-    lokasi TEXT,
-    harga INTEGER,
-    deskripsi TEXT,
-    gambar TEXT
-  )
-`);
+// Define Property Schema
+const propertySchema = new mongoose.Schema({
+  judul: String,
+  tipe: String,
+  status: String,
+  lokasi: String,
+  harga: Number,
+  deskripsi: String,
+  gambar: String,
+  galeri: String,
+  luas_tanah: Number,
+  label: String
+}, { timestamps: true });
 
-// Add galeri column if it doesn't exist
-try {
-  db.exec('ALTER TABLE properties ADD COLUMN galeri TEXT');
-} catch (e) {
-  // Column already exists
-}
+// Ensure frontend gets 'id' instead of '_id'
+propertySchema.set('toJSON', {
+  virtuals: true,
+  transform: (doc, ret) => {
+    ret.id = ret._id;
+    delete ret._id;
+    delete ret.__v;
+  }
+});
 
-// Add luas_tanah column if it doesn't exist
-try {
-  db.exec('ALTER TABLE properties ADD COLUMN luas_tanah INTEGER');
-} catch (e) {
-  // Column already exists
-}
-
-// Add label column if it doesn't exist
-try {
-  db.exec('ALTER TABLE properties ADD COLUMN label TEXT');
-} catch (e) {
-  // Column already exists
-}
-
-// Seed data if empty
-const count = db.prepare('SELECT COUNT(*) as count FROM properties').get() as { count: number };
-if (count.count === 0) {
-  const insert = db.prepare('INSERT INTO properties (judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri, luas_tanah, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-}
+const Property = mongoose.model('Property', propertySchema);
 
 const app = express();
 app.use(express.json());
@@ -70,35 +59,55 @@ app.post('/api/login', (req, res) => {
   }
 });
 
-app.get('/api/properties', (req, res) => {
-  const properties = db.prepare('SELECT * FROM properties ORDER BY id DESC').all();
-  res.json(properties);
+app.get('/api/properties', async (req, res) => {
+  try {
+    const properties = await Property.find().sort({ createdAt: -1 });
+    res.json(properties);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch properties' });
+  }
 });
 
-app.post('/api/properties', requireAuth, (req, res) => {
-  const { judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri, luas_tanah, label } = req.body;
-  const galeriStr = galeri ? JSON.stringify(galeri) : '[]';
-  const insert = db.prepare('INSERT INTO properties (judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri, luas_tanah, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  const info = insert.run(judul, tipe, status, lokasi, harga, deskripsi, gambar, galeriStr, luas_tanah || null, label || null);
-  res.json({ id: info.lastInsertRowid });
+app.post('/api/properties', requireAuth, async (req, res) => {
+  try {
+    const { judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri, luas_tanah, label } = req.body;
+    const galeriStr = galeri ? JSON.stringify(galeri) : '[]';
+    
+    const newProperty = await Property.create({
+      judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri: galeriStr, luas_tanah: luas_tanah || null, label: label || null
+    });
+    
+    res.json({ id: newProperty._id });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create property' });
+  }
 });
 
-app.put('/api/properties/:id', requireAuth, (req, res) => {
-  const { judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri, luas_tanah, label } = req.body;
-  const galeriStr = galeri ? JSON.stringify(galeri) : '[]';
-  const update = db.prepare('UPDATE properties SET judul = ?, tipe = ?, status = ?, lokasi = ?, harga = ?, deskripsi = ?, gambar = ?, galeri = ?, luas_tanah = ?, label = ? WHERE id = ?');
-  update.run(judul, tipe, status, lokasi, harga, deskripsi, gambar, galeriStr, luas_tanah || null, label || null, req.params.id);
-  res.json({ success: true });
-});
-
-app.delete('/api/properties/:id', requireAuth, (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const del = db.prepare('DELETE FROM properties WHERE id = ?');
-  const info = del.run(id);
-  if (info.changes > 0) {
+app.put('/api/properties/:id', requireAuth, async (req, res) => {
+  try {
+    const { judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri, luas_tanah, label } = req.body;
+    const galeriStr = galeri ? JSON.stringify(galeri) : '[]';
+    
+    await Property.findByIdAndUpdate(req.params.id, {
+      judul, tipe, status, lokasi, harga, deskripsi, gambar, galeri: galeriStr, luas_tanah: luas_tanah || null, label: label || null
+    });
+    
     res.json({ success: true });
-  } else {
-    res.status(404).json({ error: 'Property not found' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update property' });
+  }
+});
+
+app.delete('/api/properties/:id', requireAuth, async (req, res) => {
+  try {
+    const deleted = await Property.findByIdAndDelete(req.params.id);
+    if (deleted) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Property not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete property' });
   }
 });
 
