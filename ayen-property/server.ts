@@ -52,7 +52,7 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
 // API Routes
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
-  if (username === 'admin' && password === 'admin123') {
+  if (username === 'admin' && password === 'admin252611') {
     res.json({ token: ADMIN_TOKEN });
   } else {
     res.status(401).json({ error: 'Invalid credentials' });
